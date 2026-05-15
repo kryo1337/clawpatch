@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+.clawpatch/runs/
+.clawpatch/findings/
+.clawpatch/patches/
+.clawpatch/reports/
+.clawpatch/locks/
