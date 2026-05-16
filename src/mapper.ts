@@ -1,6 +1,7 @@
 import { nowIso } from "./fs.js";
 import { stableId } from "./id.js";
 import { configSeeds } from "./mappers/config.js";
+import { dotnetSeeds } from "./mappers/dotnet.js";
 import { goSeeds } from "./mappers/go.js";
 import { appleSeeds } from "./mappers/apple.js";
 import { gradleSeeds } from "./mappers/gradle.js";
@@ -29,6 +30,7 @@ const featureMappers: FeatureMapper[] = [
   { name: "swift", map: swiftSeeds },
   { name: "apple", map: appleSeeds },
   { name: "gradle", map: gradleSeeds },
+  { name: "dotnet", map: dotnetSeeds },
   { name: "config", map: configSeeds },
 ];
 

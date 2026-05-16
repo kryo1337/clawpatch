@@ -14,6 +14,10 @@ export async function configSeeds(root: string): Promise<FeatureSeed[]> {
     "rust-toolchain.toml",
     "Package.swift",
     "Makefile",
+    "Directory.Build.props",
+    "Directory.Build.targets",
+    "global.json",
+    "NuGet.config",
   ];
   const seeds: FeatureSeed[] = [];
   for (const file of candidates) {

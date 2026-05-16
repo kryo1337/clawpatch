@@ -479,6 +479,403 @@ describe("mapFeatures", () => {
     ]);
   });
 
+  it("maps nested .NET solutions, projects, ASP.NET endpoints, and tests", async () => {
+    const root = await fixtureRoot("clawpatch-dotnet-api-map-");
+    await writeFixture(
+      root,
+      "server/Tracker.sln",
+      [
+        'Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tracker.Api", "src\\Tracker.Api\\Tracker.Api.csproj", "{11111111-1111-1111-1111-111111111111}"',
+        "EndProject",
+        'Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tracker.Api.Tests", "tests\\Tracker.Api.Tests\\Tracker.Api.Tests.csproj", "{22222222-2222-2222-2222-222222222222}"',
+        "EndProject",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "server/src/Tracker.Api/Tracker.Api.csproj",
+      [
+        '<Project Sdk="Microsoft.NET.Sdk.Web">',
+        "  <ItemGroup>",
+        '    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />',
+        '    <ProjectReference Include="..\\Tracker.Api.Contracts\\Tracker.Api.Contracts.csproj" />',
+        "  </ItemGroup>",
+        "</Project>",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "server/src/Tracker.Api/Program.cs",
+      [
+        "var app = builder.Build();",
+        'var v1 = app.MapGroup("/api/v1");',
+        "v1.MapTagsEndpoints();",
+        "v1.MapTrainingTemplatesEndpoints();",
+        'app.MapGet("/health", () => Results.Ok());',
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "server/src/Tracker.Api/Features/Tags/TagsEndpoints.cs",
+      [
+        "public static class TagsEndpoints",
+        "{",
+        "  public static IEndpointRouteBuilder MapTagsEndpoints(this IEndpointRouteBuilder app)",
+        "  {",
+        '    var g = app.MapGroup("/tags").RequireAuthorization();',
+        '    g.MapGet("", List);',
+        '    g.MapPost("", Create);',
+        "    return app;",
+        "  }",
+        "}",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "server/src/Tracker.Api/Features/Gym/TrainingTemplatesEndpoints.cs",
+      [
+        "public static class TrainingTemplatesEndpoints",
+        "{",
+        "  public static IEndpointRouteBuilder MapTrainingTemplatesEndpoints(this IEndpointRouteBuilder app)",
+        "  {",
+        '    var g = app.MapGroup("/training-templates").RequireAuthorization();',
+        '    g.MapPost("", Create);',
+        "    return app;",
+        "  }",
+        "}",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "server/src/Tracker.Api/Controllers/NewsController.cs",
+      [
+        "[ApiController]",
+        '[Route("api/[controller]")]',
+        "public sealed class NewsController : ControllerBase",
+        "{",
+        '  [HttpGet("GetActive")]',
+        "  public IActionResult GetActive() => Ok();",
+        "}",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "server/src/Tracker.Api/Infrastructure/Auth/CloudflareAccessAuth.cs",
+      "public sealed class CloudflareAccessValidator {}\n",
+    );
+    await writeFixture(
+      root,
+      "server/src/Tracker.Api/Infrastructure/Auth/SessionAuth.cs",
+      "public sealed class SessionAuthHandler {}\n",
+    );
+    await writeFixture(
+      root,
+      "server/tests/Tracker.Api.Tests/Tracker.Api.Tests.csproj",
+      [
+        '<Project Sdk="Microsoft.NET.Sdk">',
+        "  <ItemGroup>",
+        '    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.0.0" />',
+        '    <PackageReference Include="xunit" Version="2.0.0" />',
+        "  </ItemGroup>",
+        "</Project>",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "server/tests/Tracker.Api.Tests/Endpoints/TagsEndpointsTests.cs",
+      "public sealed class TagsEndpointsTests { [Fact] public void Works() {} }\n",
+    );
+    await writeFixture(
+      root,
+      "server/tests/Tracker.Api.Tests/Endpoints/SupsBundlesAndTrainingTemplatesTests.cs",
+      "public sealed class SupsBundlesAndTrainingTemplatesTests { [Fact] public void Works() {} }\n",
+    );
+    await writeFixture(
+      root,
+      "server/tests/Tracker.Api.Tests/Unit/CloudflareAccessValidatorTests.cs",
+      "public sealed class CloudflareAccessValidatorTests { [Fact] public void Works() {} }\n",
+    );
+    await writeFixture(
+      root,
+      "server/tests/Tracker.Api.Tests/Unit/SessionAuthHashTests.cs",
+      "public sealed class SessionAuthHashTests { [Fact] public void Works() {} }\n",
+    );
+    await writeFixture(
+      root,
+      "server/src/Tracker.Api/Infrastructure/Persistence/Migrations/Init.Designer.cs",
+      "public sealed class Generated {}\n",
+    );
+    await writeFixture(
+      root,
+      "server/src/Tracker.Api/Properties/AssemblyInfo.cs",
+      '[assembly: System.Reflection.AssemblyVersion("1.0.0.0")]\n',
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+    const solution = result.features.find(
+      (feature) => feature.title === "Dotnet solution Tracker.sln",
+    );
+    const api = result.features.find((feature) => feature.title === "Dotnet project Tracker.Api");
+    const tags = result.features.find((feature) => feature.title === "ASP.NET endpoints Tags");
+    const trainingTemplates = result.features.find(
+      (feature) => feature.title === "ASP.NET endpoints TrainingTemplates",
+    );
+    const news = result.features.find((feature) => feature.title === "ASP.NET controller News");
+    const auth = result.features.find(
+      (feature) => feature.title === "Dotnet source server/src/Tracker.Api",
+    );
+    const refs = result.features.flatMap((feature) => [
+      ...feature.entrypoints.map((entry) => entry.path),
+      ...feature.ownedFiles.map((file) => file.path),
+      ...feature.contextFiles.map((file) => file.path),
+      ...feature.tests.map((test) => test.path),
+    ]);
+
+    expect(project.detected.languages).toContain("csharp");
+    expect(project.detected.frameworks).toContain("aspnetcore");
+    expect(project.detected.packageManagers).toContain("dotnet");
+    expect(project.detected.commands.typecheck).toBe("dotnet build server/Tracker.sln");
+    expect(project.detected.commands.test).toBe("dotnet test server/Tracker.sln");
+    expect(titles).toContain("Dotnet solution Tracker.sln");
+    expect(titles).toContain("Dotnet project Tracker.Api");
+    expect(titles).toContain("Dotnet test suite server/tests/Tracker.Api.Tests");
+    expect(solution?.contextFiles.map((file) => file.path)).toContain(
+      "server/src/Tracker.Api/Tracker.Api.csproj",
+    );
+    expect(api?.contextFiles.map((file) => file.path)).toContain(
+      "server/src/Tracker.Api.Contracts/Tracker.Api.Contracts.csproj",
+    );
+    expect(tags?.entrypoints[0]?.route).toBe("/api/v1/tags");
+    expect(tags?.tests).toEqual([
+      {
+        path: "server/tests/Tracker.Api.Tests/Endpoints/TagsEndpointsTests.cs",
+        command: "dotnet test server/Tracker.sln",
+      },
+    ]);
+    expect(trainingTemplates?.tests).toEqual([
+      {
+        path: "server/tests/Tracker.Api.Tests/Endpoints/SupsBundlesAndTrainingTemplatesTests.cs",
+        command: "dotnet test server/Tracker.sln",
+      },
+    ]);
+    expect(auth?.tests).toEqual([
+      {
+        path: "server/tests/Tracker.Api.Tests/Unit/CloudflareAccessValidatorTests.cs",
+        command: "dotnet test server/Tracker.sln",
+      },
+      {
+        path: "server/tests/Tracker.Api.Tests/Unit/SessionAuthHashTests.cs",
+        command: "dotnet test server/Tracker.sln",
+      },
+    ]);
+    expect(news?.entrypoints[0]?.route).toBe("/api/News");
+    expect(refs.some((path) => path.includes("\\"))).toBe(false);
+    expect(
+      result.features.flatMap((feature) => feature.ownedFiles.map((file) => file.path)),
+    ).not.toContain(
+      "server/src/Tracker.Api/Infrastructure/Persistence/Migrations/Init.Designer.cs",
+    );
+    expect(
+      result.features.flatMap((feature) => feature.ownedFiles.map((file) => file.path)),
+    ).not.toContain("server/src/Tracker.Api/Properties/AssemblyInfo.cs");
+  });
+
+  it("maps Blazor routes with code-behind and non-routed UI source groups", async () => {
+    const root = await fixtureRoot("clawpatch-dotnet-blazor-map-");
+    await writeFixture(
+      root,
+      "WebApp.csproj",
+      [
+        '<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">',
+        "  <ItemGroup>",
+        '    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="8.0.0" />',
+        "  </ItemGroup>",
+        "</Project>",
+      ].join("\n"),
+    );
+    await writeFixture(root, "Program.cs", "builder.Services.AddScoped<AppState>();\n");
+    await writeFixture(root, "_Imports.razor", "@using Microsoft.AspNetCore.Components\n");
+    await writeFixture(
+      root,
+      "Pages/User/LoginPage.razor",
+      '@page "/login"\n@page "/"\n<h1>Login</h1>\n',
+    );
+    await writeFixture(
+      root,
+      "Pages/User/LoginPage.razor.cs",
+      "public partial class LoginPage {}\n",
+    );
+    await writeFixture(root, "Pages/User/LoginPage.razor.css", "h1 { color: red; }\n");
+    await writeFixture(root, "Shared/Components/TablePager.razor", "<button>Next</button>\n");
+    await writeFixture(root, "wwwroot/appsettings.json", "{}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const login = result.features.find((feature) => feature.title === "Blazor route /login");
+    const home = result.features.find((feature) => feature.title === "Blazor route /");
+    const source = result.features.find((feature) => feature.title === "Dotnet source WebApp");
+
+    expect(project.detected.languages).toContain("csharp");
+    expect(project.detected.frameworks).toContain("blazor");
+    expect(project.detected.commands.typecheck).toBe("dotnet build WebApp.csproj");
+    expect(project.detected.commands.test).toBeNull();
+    expect(login?.ownedFiles.map((file) => file.path).toSorted()).toEqual([
+      "Pages/User/LoginPage.razor",
+      "Pages/User/LoginPage.razor.cs",
+      "Pages/User/LoginPage.razor.css",
+    ]);
+    expect(home?.entrypoints[0]?.path).toBe("Pages/User/LoginPage.razor");
+    expect(source?.ownedFiles.map((file) => file.path)).toContain(
+      "Shared/Components/TablePager.razor",
+    );
+    expect(source?.ownedFiles.map((file) => file.path)).not.toContain("Pages/User/LoginPage.razor");
+  });
+
+  it("maps .slnx projects statically", async () => {
+    const root = await fixtureRoot("clawpatch-dotnet-slnx-map-");
+    await writeFixture(
+      root,
+      "App.slnx",
+      '<Solution><Project Path="src/App/App.csproj" /></Solution>\n',
+    );
+    await writeFixture(
+      root,
+      "src/App/App.csproj",
+      '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>\n',
+    );
+    await writeFixture(root, "src/App/Program.cs", 'Console.WriteLine("hi");\n');
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(project.detected.commands.typecheck).toBe("dotnet build App.slnx");
+    expect(titles).toContain("Dotnet solution App.slnx");
+    expect(titles).toContain("Dotnet project App");
+    expect(titles).toContain("Dotnet source src/App");
+  });
+
+  it("maps .NET projects under packages directories", async () => {
+    const root = await fixtureRoot("clawpatch-dotnet-packages-map-");
+    await writeFixture(
+      root,
+      "packages/Api/Api.csproj",
+      [
+        '<Project Sdk="Microsoft.NET.Sdk">',
+        "  <ItemGroup>",
+        '    <PackageReference Include="Microsoft.AspNetCore.Mvc.Core" Version="10.0.0" />',
+        "  </ItemGroup>",
+        "</Project>",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "packages/Api/Program.cs",
+      'var app = WebApplication.Create(); app.MapGet("/health", () => "ok");\n',
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(project.detected.languages).toContain("csharp");
+    expect(project.detected.frameworks).toContain("aspnetcore");
+    expect(project.detected.packageManagers).toContain("dotnet");
+    expect(project.detected.commands.typecheck).toBe("dotnet build packages/Api/Api.csproj");
+    expect(titles).toContain("Dotnet project Api");
+    expect(titles).toContain("ASP.NET endpoints Program");
+  });
+
+  it("keeps .NET detection aligned with mapper discovery depth", async () => {
+    const root = await fixtureRoot("clawpatch-dotnet-depth-map-");
+    await writeFixture(
+      root,
+      "a/b/c/d/e/f/Api/Api.csproj",
+      '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>\n',
+    );
+    await writeFixture(
+      root,
+      "a/b/c/d/e/f/Api/Program.cs",
+      'var app = WebApplication.Create(); app.MapGet("/health", () => "ok");\n',
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(project.detected.languages).toContain("csharp");
+    expect(project.detected.frameworks).toContain("aspnetcore");
+    expect(project.detected.packageManagers).toContain("dotnet");
+    expect(project.detected.commands.typecheck).toBe("dotnet build a/b/c/d/e/f/Api/Api.csproj");
+    expect(titles).toContain("Dotnet project Api");
+    expect(titles).toContain("ASP.NET endpoints Program");
+  });
+
+  it("does not emit dotnet build commands for bare C# files without projects", async () => {
+    const root = await fixtureRoot("clawpatch-dotnet-bare-csharp-map-");
+    await writeFixture(root, "src/Utility.cs", "public static class Utility {}\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+
+    expect(project.detected.languages).toContain("csharp");
+    expect(project.detected.packageManagers).not.toContain("dotnet");
+    expect(project.detected.commands.typecheck).toBeNull();
+    expect(project.detected.commands.test).toBeNull();
+    expect(result.features.map((feature) => feature.title)).not.toContain("Dotnet source src");
+  });
+
+  it("associates tests from capitalized Tests fallback roots", async () => {
+    const root = await fixtureRoot("clawpatch-dotnet-capital-tests-map-");
+    await writeFixture(
+      root,
+      "src/App/App.csproj",
+      '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>\n',
+    );
+    await writeFixture(root, "src/App/Services/Clock.cs", "public sealed class Clock {}\n");
+    await writeFixture(
+      root,
+      "Tests/Spec/Spec.csproj",
+      '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>\n',
+    );
+    await writeFixture(
+      root,
+      "Tests/Spec/Services/ClockTests.cs",
+      "public sealed class ClockTests { [Fact] public void Works() {} }\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const source = result.features.find((feature) => feature.title === "Dotnet source src/App");
+
+    expect(project.detected.commands.test).toBe("dotnet test");
+    expect(source?.tests).toEqual([
+      { path: "Tests/Spec/Services/ClockTests.cs", command: "dotnet test" },
+    ]);
+  });
+
+  it("detects Blazor Server projects from SDK Web projects with Razor components", async () => {
+    const root = await fixtureRoot("clawpatch-dotnet-blazor-server-map-");
+    await writeFixture(
+      root,
+      "ServerBlazor.csproj",
+      '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>\n',
+    );
+    await writeFixture(root, "Pages/Home.razor", '@page "/"\n<h1>Home</h1>\n');
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const server = result.features.find(
+      (feature) => feature.title === "Dotnet project ServerBlazor",
+    );
+
+    expect(project.detected.frameworks).toContain("blazor");
+    expect(server?.tags).toContain("blazor");
+    expect(result.features.map((feature) => feature.title)).toContain("Blazor route /");
+  });
+
   it("normalizes root Gradle source groups", async () => {
     const root = await fixtureRoot("clawpatch-root-gradle-map-");
     await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");

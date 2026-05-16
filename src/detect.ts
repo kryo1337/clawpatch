@@ -1,5 +1,5 @@
 import { lstat, readFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathExists } from "./fs.js";
 import { projectNameFromRoot, discoverGit } from "./git.js";
 import { stableId } from "./id.js";
@@ -19,12 +19,14 @@ type PythonProjectInfo = {
   hasPytestConfig: boolean;
 };
 
+const dotnetDiscoveryDepth = 7;
+
 export async function detectProject(root: string): Promise<ProjectRecord> {
   const git = await discoverGit(root);
   const pkg = await readPackageJson(root);
   const packageManagers = await detectPackageManagers(root);
-  const frameworks = detectFrameworks(pkg);
   const languages = await detectLanguages(root);
+  const frameworks = await detectFrameworks(root, pkg);
   const commands = await detectCommands(root, pkg, languages, packageManagers);
   const name = typeof pkg?.name === "string" ? pkg.name : projectNameFromRoot(root, git.remoteUrl);
   const now = new Date().toISOString();
@@ -144,6 +146,9 @@ async function languageDefaultCommands(
   if (languages.includes("python")) {
     return pythonDefaultCommands(root);
   }
+  if (languages.includes("csharp")) {
+    return dotnetDefaultCommands(root);
+  }
 
   return {
     typecheck: null,
@@ -216,6 +221,14 @@ async function detectPackageManagers(root: string): Promise<string[]> {
   ) {
     found.push("gradle");
   }
+  if (
+    !found.includes("dotnet") &&
+    ((await containsFileWithExtension(root, ".csproj", dotnetDiscoveryDepth)) ||
+      (await containsFileWithExtension(root, ".sln", dotnetDiscoveryDepth)) ||
+      (await containsFileWithExtension(root, ".slnx", dotnetDiscoveryDepth)))
+  ) {
+    found.push("dotnet");
+  }
   const pythonManagers: Array<[string, string]> = [
     ["uv", "uv.lock"],
     ["poetry", "poetry.lock"],
@@ -262,6 +275,89 @@ async function pythonDefaultCommands(root: string): Promise<ProjectCommands> {
     format: hasRuff ? pythonRunCommand(runner, "ruff format --check .") : null,
     test: hasPytest ? pythonRunCommand(runner, "pytest") : null,
   };
+}
+
+async function dotnetDefaultCommands(root: string): Promise<ProjectCommands> {
+  const target = await dotnetCommandTarget(root);
+  if (target === null) {
+    if (!(await hasDotnetCommandTarget(root))) {
+      return {
+        typecheck: null,
+        lint: null,
+        format: null,
+        test: null,
+      };
+    }
+    return {
+      typecheck: "dotnet build",
+      lint: null,
+      format: null,
+      test: (await containsDotnetTestSignal(root, dotnetDiscoveryDepth)) ? "dotnet test" : null,
+    };
+  }
+  return {
+    typecheck: `dotnet build ${target}`,
+    lint: null,
+    format: null,
+    test: (await containsDotnetTestSignal(root, dotnetDiscoveryDepth))
+      ? `dotnet test ${target}`
+      : null,
+  };
+}
+
+async function dotnetCommandTarget(root: string): Promise<string | null> {
+  const solutions = await filesWithExtensions(root, [".sln", ".slnx"], dotnetDiscoveryDepth);
+  if (solutions.length === 1) {
+    return solutions[0] ?? null;
+  }
+  if (solutions.length > 1) {
+    const rootSolution = solutions.find((file) => !file.includes("/"));
+    if (rootSolution !== undefined) {
+      return rootSolution;
+    }
+    return null;
+  }
+  const projects = await filesWithExtensions(root, [".csproj"], dotnetDiscoveryDepth);
+  return projects.length === 1 ? (projects[0] ?? null) : null;
+}
+
+async function hasDotnetCommandTarget(root: string): Promise<boolean> {
+  return (
+    (await containsFileWithExtension(root, ".csproj", dotnetDiscoveryDepth)) ||
+    (await containsFileWithExtension(root, ".sln", dotnetDiscoveryDepth)) ||
+    (await containsFileWithExtension(root, ".slnx", dotnetDiscoveryDepth))
+  );
+}
+
+async function containsDotnetTestSignal(root: string, maxDepth: number): Promise<boolean> {
+  if (
+    await containsFileMatching(root, maxDepth, (entry) =>
+      ["xunit.runner.json", ".runsettings"].includes(entry),
+    )
+  ) {
+    return true;
+  }
+  for (const file of await filesWithExtensions(root, [".cs"], maxDepth)) {
+    if (/(^|\/)(tests?|[^/]+Tests)(\/|$)/iu.test(file) || file.endsWith("Tests.cs")) {
+      return true;
+    }
+    const source = await readFile(join(root, file), "utf8").catch(() => "");
+    if (/\[(Fact|Theory|Test|TestMethod)\b/u.test(source)) {
+      return true;
+    }
+  }
+  for (const project of await filesWithExtensions(root, [".csproj"], maxDepth)) {
+    const source = await readFile(join(root, project), "utf8").catch(() => "");
+    if (
+      /<IsTestProject>\s*true\s*<\/IsTestProject>/iu.test(source) ||
+      /PackageReference\b[^>]*Include="(?:Microsoft\.NET\.Test\.Sdk|xunit|NUnit|MSTest\.TestFramework)"/iu.test(
+        source,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function pythonRunner(root: string): Promise<string | null> {
@@ -667,7 +763,7 @@ async function containsSwiftFile(dir: string): Promise<boolean> {
   return false;
 }
 
-function detectFrameworks(pkg: PackageJson | null): string[] {
+async function detectFrameworks(root: string, pkg: PackageJson | null): Promise<string[]> {
   const deps = dependencyNames(pkg);
   const frameworks: string[] = [];
   for (const name of ["next", "express", "fastify", "hono", "vitest"]) {
@@ -675,7 +771,41 @@ function detectFrameworks(pkg: PackageJson | null): string[] {
       frameworks.push(name);
     }
   }
+  if (await containsDotnetFrameworkSignal(root, "aspnetcore")) {
+    frameworks.push("aspnetcore");
+  }
+  if (await containsDotnetFrameworkSignal(root, "blazor")) {
+    frameworks.push("blazor");
+  }
   return frameworks;
+}
+
+async function containsDotnetFrameworkSignal(
+  root: string,
+  framework: "aspnetcore" | "blazor",
+): Promise<boolean> {
+  for (const project of await filesWithExtensions(root, [".csproj"], dotnetDiscoveryDepth)) {
+    const source = await readFile(join(root, project), "utf8").catch(() => "");
+    const lower = source.toLowerCase();
+    if (
+      framework === "aspnetcore" &&
+      (lower.includes("microsoft.net.sdk.web") ||
+        lower.includes("microsoft.aspnetcore") ||
+        lower.includes("swashbuckle.aspnetcore"))
+    ) {
+      return true;
+    }
+    if (
+      framework === "blazor" &&
+      (lower.includes("microsoft.net.sdk.blazorwebassembly") ||
+        lower.includes("microsoft.aspnetcore.components") ||
+        (lower.includes("microsoft.net.sdk.web") &&
+          (await dotnetProjectHasRazorFiles(root, project))))
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function dependencyNames(pkg: PackageJson | null): Set<string> {
@@ -702,10 +832,18 @@ async function detectLanguages(root: string): Promise<string[]> {
     ["python", "setup.py"],
     ["python", "setup.cfg"],
     ["python", "requirements.txt"],
+    ["csharp", "*.csproj"],
   ];
   const languages: string[] = [];
   for (const [language, file] of checks) {
-    if ((await pathExists(join(root, file))) && !languages.includes(language)) {
+    const exists = file.startsWith("*")
+      ? await containsFileWithExtension(
+          root,
+          file.slice(1),
+          language === "csharp" ? dotnetDiscoveryDepth : 5,
+        )
+      : await pathExists(join(root, file));
+    if (exists && !languages.includes(language)) {
       languages.push(language);
     }
   }
@@ -725,6 +863,14 @@ async function detectLanguages(root: string): Promise<string[]> {
       (await containsFileWithExtension(root, ".kts", 5)))
   ) {
     languages.push("kotlin");
+  }
+  if (
+    !languages.includes("csharp") &&
+    ((await containsFileWithExtension(root, ".csproj", dotnetDiscoveryDepth)) ||
+      (await containsFileWithExtension(root, ".cs", dotnetDiscoveryDepth)) ||
+      (await containsFileWithExtension(root, ".razor", dotnetDiscoveryDepth)))
+  ) {
+    languages.push("csharp");
   }
   return languages;
 }
@@ -760,6 +906,52 @@ async function containsFileWithExtension(
   return containsFileMatching(root, maxDepth, (entry) => entry.endsWith(extension));
 }
 
+async function filesWithExtensions(
+  root: string,
+  extensions: string[],
+  maxDepth: number,
+): Promise<string[]> {
+  const files: string[] = [];
+  await collectFilesWithExtensions(root, "", maxDepth, extensions, files);
+  return files.toSorted();
+}
+
+async function collectFilesWithExtensions(
+  root: string,
+  dir: string,
+  remainingDepth: number,
+  extensions: string[],
+  files: string[],
+): Promise<void> {
+  if (remainingDepth < 0) {
+    return;
+  }
+  const full = dir === "" ? root : join(root, dir);
+  if (!(await pathExists(full))) {
+    return;
+  }
+  const dirInfo = await lstat(full);
+  if (!dirInfo.isDirectory() || dirInfo.isSymbolicLink()) {
+    return;
+  }
+  for (const entry of await readdir(full)) {
+    if (ignoredDetectionEntry(entry)) {
+      continue;
+    }
+    const relative = dir === "" ? entry : `${dir}/${entry}`;
+    const path = join(full, entry);
+    const info = await lstat(path);
+    if (info.isSymbolicLink()) {
+      continue;
+    }
+    if (info.isFile() && extensions.some((extension) => entry.endsWith(extension))) {
+      files.push(relative);
+    } else if (info.isDirectory()) {
+      await collectFilesWithExtensions(root, relative, remainingDepth - 1, extensions, files);
+    }
+  }
+}
+
 async function containsFileMatching(
   dir: string,
   remainingDepth: number,
@@ -773,32 +965,7 @@ async function containsFileMatching(
     return false;
   }
   for (const entry of await readdir(dir)) {
-    if (
-      [
-        "node_modules",
-        "dist",
-        "build",
-        "target",
-        ".build",
-        ".swiftpm",
-        ".git",
-        ".clawpatch",
-        ".worktrees",
-        ".venv",
-        "venv",
-        "__pycache__",
-        ".mypy_cache",
-        ".ruff_cache",
-        ".pytest_cache",
-        "fixtures",
-        "__fixtures__",
-        "testdata",
-        "Pods",
-        "Carthage",
-        "SourcePackages",
-        "DerivedData",
-      ].includes(entry)
-    ) {
+    if (ignoredDetectionEntry(entry)) {
       continue;
     }
     const full = join(dir, entry);
@@ -814,6 +981,45 @@ async function containsFileMatching(
     }
   }
   return false;
+}
+
+function ignoredDetectionEntry(entry: string): boolean {
+  return [
+    "node_modules",
+    "dist",
+    "build",
+    "target",
+    ".build",
+    ".swiftpm",
+    ".git",
+    ".clawpatch",
+    ".worktrees",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    "fixtures",
+    "__fixtures__",
+    "testdata",
+    "Pods",
+    "Carthage",
+    "SourcePackages",
+    "DerivedData",
+    "bin",
+    "obj",
+    ".vs",
+    "TestResults",
+  ].includes(entry);
+}
+
+async function dotnetProjectHasRazorFiles(root: string, project: string): Promise<boolean> {
+  const projectRoot = dirname(project);
+  const prefix = projectRoot === "." ? "" : `${projectRoot}/`;
+  return (await filesWithExtensions(root, [".razor"], dotnetDiscoveryDepth)).some(
+    (file) => prefix === "" || file.startsWith(prefix),
+  );
 }
 
 function stripLineComments(source: string, marker: "//"): string {

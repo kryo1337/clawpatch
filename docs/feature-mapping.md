@@ -39,6 +39,8 @@ Supported deterministic mappers today:
 - nested SwiftPM packages
 - Apple/Xcode projects from `project.yml`, `.xcodeproj`, or `.xcworkspace`
 - Gradle/Android modules from `settings.gradle(.kts)` and `build.gradle(.kts)`
+- .NET/C# solutions and projects from `.sln`, `.slnx`, and `.csproj`
+- Blazor `@page` routes, Razor component groups, ASP.NET controllers, and Minimal API endpoint modules
 - common config files
 
 The mapper does not call a model. It uses repo conventions and cheap filesystem
@@ -52,6 +54,9 @@ be found cheaply.
 Native app mappers use the same bounded grouping model. SwiftPM packages can be
 discovered below the repo root, Apple projects are grouped by Swift source area,
 and Gradle modules are grouped from `src/main`, `src/test`, and `src/androidTest`.
+.NET projects are discovered without invoking the `dotnet` CLI, grouped by
+project/source area, and test projects are attached when common xUnit/NUnit/MSTest
+signals are present.
 
 Python mapping covers `pyproject.toml` metadata, `[project.scripts]` and
 `[tool.poetry.scripts]` console scripts, source groups under common Python
@@ -62,5 +67,7 @@ Known gaps:
 
 - no Express/Fastify/Hono route mapper yet
 - no FastAPI/Flask/Django route mapper yet
+- no F#/VB project mapper yet
+- no dynamic ASP.NET route inference beyond literal route patterns yet
 - no import graph expansion beyond nearby tests yet
 - no agent enrichment yet
